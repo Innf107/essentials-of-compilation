@@ -3,24 +3,26 @@ module StringMap = import("stringMap.pls")
 type StringMap(a) = StringMap.StringMap(a)
 module Unique = import("unique.pls")
 type Unique = Unique.Unique
+module Test = import("test.pls")
 
 type Primop = < Read, Add, Subtract >
 
-data LVarExpr(name, self, r) =
+data LVarExprR(name, self, r) =
     < Int(Number)
-    , Prim(Primop, List(LVarExpr(name, r, r)))
+    , Prim(Primop, List(LVarExprR(name, r, r)))
     , Var(name)
-    , Let(name, LVarExpr(name, r, r), LVarExpr(name, r, r)) 
+    , Let(name, LVarExprR(name, r, r), LVarExprR(name, r, r)) 
     | self
     >
+type LVarExpr(name) = LVarExprR(name, < > , < >)
 
-data LVarProgram(name) = { body : LVarExpr(name, < > , < >) }
+data LVarProgram(name) = { body : LVarExpr(name) }
 
 data Env = { variables : StringMap(Number) }
 
 let read() = !cat
 
-let interpretExprWith : forall r. ((Env, LVarExpr(String, r, r)) -> Number, Env, LVarExpr(String, < > , r)) -> Number
+let interpretExprWith : forall r. ((Env, LVarExprR(String, r, r)) -> Number, Env, LVarExprR(String, < > , r)) -> Number
 let interpretExprWith(recur, env, expr) = {
     let invalidPrimopArgs(primop, exprs) = fail("Invalid arguments to primop '${primop}': " ~ toString(exprs))
     match expr! {
@@ -43,23 +45,25 @@ let interpretExprWith(recur, env, expr) = {
     }
 }
 
-let interpretExpr : (Env, LVarExpr(String, < > , < >)) -> Number
+let interpretExpr : (Env, LVarExpr(String)) -> Number
 let interpretExpr(env, expr) = interpretExprWith(interpretExpr, env, expr)
 
 
-data LVarIf(name, self, r) = LVarExpr(name
-                                     , < If({ condition : LVarIf(name, r, r)
-                                            , thenBranch : LVarIf(name, r, r)
-                                            , elseBranch : LVarIf(name, r, r) 
-                                            })
-                                       | self > 
-                                     , < If({ condition : LVarIf(name, r, r)
-                                            , thenBranch : LVarIf(name, r, r)
-                                            , elseBranch : LVarIf(name, r, r)
-                                            })
-                                       | r >)
+data LVarIfR(name, self, r) =
+    LVarExprR(name
+             , < If({ condition : LVarIfR(name, r, r)
+                    , thenBranch : LVarIfR(name, r, r)
+                    , elseBranch : LVarIfR(name, r, r) 
+                    })
+               | self > 
+             , < If({ condition : LVarIfR(name, r, r)
+                    , thenBranch : LVarIfR(name, r, r)
+                    , elseBranch : LVarIfR(name, r, r)
+                    })
+               | r >)
+type LVarIf(name) = LVarIfR(name, < > , < >)
 
-let interpretLVarIfExprWith : forall r. ((Env, LVarIf(String, r , r)) -> Number, Env, LVarIf(String, < > , r)) -> Number
+let interpretLVarIfExprWith : forall r. ((Env, LVarIfR(String, r , r)) -> Number, Env, LVarIfR(String, < > , r)) -> Number
 let interpretLVarIfExprWith(recur, env, expr) = {
     match expr!! {
         If(ifExpr) ->
@@ -68,11 +72,11 @@ let interpretLVarIfExprWith(recur, env, expr) = {
             else
                 recur(env, ifExpr.elseBranch)
 
-        other -> interpretExprWith(\env expr -> recur(env, LVarIf(expr)), env, LVarExpr(other))
+        other -> interpretExprWith(\env expr -> recur(env, LVarIfR(expr)), env, LVarExprR(other))
     }
 }
 
-let interpretLVarIfExpr : (Env, LVarIf(String, < > , < >)) -> Number
+let interpretLVarIfExpr : (Env, LVarIf(String)) -> Number
 let interpretLVarIfExpr(env, expr) = interpretLVarIfExprWith(interpretLVarIfExpr, env, expr)
 
 
@@ -118,8 +122,8 @@ data Scope = { variables : StringMap(Name) }
 let freshName : String -> Name
 let freshName(rawName) = Name({ original = rawName, unique = Unique.new() })
 
-let uniquifyExpr : (Scope, LVarExpr(String, < > , < >)) -> LVarExpr(Name, < > , < >)
-let uniquifyExpr(scope, expr) = LVarExpr(match expr! {
+let uniquifyExpr : (Scope, LVarExpr(String)) -> LVarExpr(Name)
+let uniquifyExpr(scope, expr) = LVarExprR(match expr! {
     Var(rawName) -> match StringMap.lookup(rawName, scope!.variables) {
         Nothing -> fail("Unbound variable: ${rawName}")
         Just(name) -> Var(name)
@@ -142,4 +146,40 @@ let uniquify(LVarProgram(program)) = {
     let initialScope = Scope({ variables = StringMap.empty })
     LVarProgram({ body = uniquifyExpr(initialScope, program.body) })
 }
+
+
+let rcoExpr : LVarExpr(Name) -> LVarExpr(Name)
+let rcoExpr(expr) = {
+    let rcoAtom : LVarExpr(Name) -> (LVarExpr(Name), List((Name, LVarExpr(Name))))
+    let rcoAtom(expr) = match expr! {
+        Var(name) -> (LVarExprR(Var(name)), [])
+        Int(int) -> (LVarExprR(Int(int)), [])
+        Prim(primop, args) -> {
+            let (argAtoms, argBindings) = List.unzipWith(rcoAtom, args)
+            let argBindings = List.concat(argBindings)
+            
+            let primBindingName = freshName("tmp")
+            (LVarExprR(Var(primBindingName)), List.append(argBindings, [(primBindingName, LVarExprR(Prim(primop, argAtoms)))]))
+        }
+        Let(name, expr, rest) -> {
+            let (atom, bindings) = rcoAtom(rest)
+            let expr = rcoExpr(expr)
+
+            (atom, List.append(bindings, [(name, expr)]))
+        }
+    }
+
+    LVarExprR(match expr! {
+        Var(name) -> Var(name)
+        Int(int) -> Int(int)
+        Prim(primop, args) -> {
+            let (argAtoms, argBindings) = List.unzipWith(rcoAtom, args)
+            let argBindings = List.concat(argBindings)
+
+            List.foldr(\(name, body) rest -> LVarExprR(Let(name, body, rest)), LVarExprR(Prim(primop, argAtoms)), argBindings)!
+        }
+        Let(name, expr, rest) -> Let(name, rcoExpr(expr), rcoExpr(rest))
+    })
+}
+
 

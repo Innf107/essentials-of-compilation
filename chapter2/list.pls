@@ -7,6 +7,7 @@ export {
 
     map,
     concatMap,
+    concat,
     filter,
     filterMap,
 
@@ -14,6 +15,9 @@ export {
     zipWith,
     indexed,
     
+    unzip,
+    unzipWith,
+
     contains,
     find,
 
@@ -60,6 +64,9 @@ let map(f, xs) = foldr(\x r -> f(x) :: r, [], xs)
 let concatMap : forall a b. (a -> List(b), List(a)) -> List(b)
 let concatMap(f, xs) = foldr(\x r -> append(f(x), r), [], xs)
 
+let concat : forall a. List(List(a)) -> List(a)
+let concat(lists) = concatMap(\x -> x, lists)
+
 # O(n)
 let filter : forall a. (a -> Bool, List(a)) -> List(a)
 let filter(f, xs) = match xs {
@@ -91,6 +98,20 @@ let zipWith(f, xs, ys) = match (xs, ys) {
 # O(min(n, m))
 let zip : forall a b. (List(a), List(b)) -> List((a, b))
 let zip(xs, ys) = zipWith(\x y -> (x, y), xs, ys);
+
+# O(n)
+let unzipWith : forall a b c. (a -> (b, c), List(a)) -> (List(b), List(c))
+let unzipWith(f, list) = match list {
+    [] -> ([], [])
+    x :: xs -> {
+        let (y, z) = f(x)
+        let (ys, zs) = unzipWith(f, xs)
+        (y :: ys, z :: zs)
+    }
+}
+
+let unzip : forall a b. List((a, b)) -> (List(a), List(b))
+let unzip(list) = unzipWith(\x -> x, list)
 
 # O(n)
 let indexed : forall a. List(a) -> List((a, Number))
@@ -179,6 +200,7 @@ let partition(pred, xs) = {
     go([], [], xs)
 }
 
+# O(n log n)
 let sort : List(Number) -> List(Number)
 let sort(xs) = match xs {
     [] -> []
