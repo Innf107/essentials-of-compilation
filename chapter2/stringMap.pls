@@ -2,8 +2,12 @@ export {
     StringMap,
     empty,
     insert,
-    lookup
+    lookup,
+    values,
+    map
 }
+
+module List = import("list.pls")
 
 data StringMap(a) =
     < Empty
@@ -32,3 +36,17 @@ let lookup(key, map) = match map! {
     }
 }
 
+let values : forall a. StringMap(a) -> List((String, a))
+let values(map) = match map! {
+    Empty -> []
+    Node(node) ->
+        List.append(List.append(values(node.left), [(node.key, node.value)]), values(node.right))
+}
+
+let map : forall a b. (a -> b, StringMap(a)) -> StringMap(b)
+let map(f, node) = match node! {
+    Empty -> StringMap(Empty)
+    Node(node) -> {
+        StringMap(Node({ key = node.key, value = f(node.value), left = map(f, node.left), right = map(f, node.right) }))
+    }
+}

@@ -1,6 +1,7 @@
 export {
     Unique,
-    new
+    new,
+    toInt
 }
 
 data Unique = Number
@@ -12,3 +13,6 @@ let new() = {
     nextInteger := int + 1
     Unique(int)
 }
+
+let toInt : Unique -> Number
+let toInt(unique) = unique!
