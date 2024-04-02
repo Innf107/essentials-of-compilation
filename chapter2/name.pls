@@ -4,7 +4,8 @@ export {
     Map,
     emptyMap,
     insert,
-    lookup
+    lookup,
+    size
 }
 
 # TODO: This cannot use Unique since transitive imports break the type checker :/
@@ -34,18 +35,30 @@ let compare(name1, name2) = {
 
 data Map(a) =
     < Empty
-    , Node({ key : Name, value : a, left : Map(a), right : Map(a) })
+    , Node({ key : Name, value : a, left : Map(a), right : Map(a), size : Number })
     >
 
 let emptyMap = Map(Empty)
 
+let size : forall a. Map(a) -> Number
+let size(map) = match map! {
+    Empty -> 0
+    Node(node) -> node.size
+}
+
 let insert : forall a. (Name, a, Map(a)) -> Map(a)
 let insert(key, value, map) = match map! {
-    Empty -> Map(Node({ key = key, value = value, left = emptyMap, right = emptyMap }))
+    Empty -> Map(Node({ key = key, value = value, left = emptyMap, right = emptyMap, size = 1 }))
     Node(node) -> match compare(key, node.key) {
-        Less -> Map(Node({ node with left = insert(key, value, node.left) }))
+        Less -> {
+            let left = insert(key, value, node.left)
+            Map(Node({ node with left = left, size = size(left) + size(node.right) + 1 }))
+        }
         Equal -> Map(Node({ node with value = value }))
-        Greater -> Map(Node({ node with right = insert(key, value, node.right) }))
+        Greater -> {
+            let right = insert(key, value, node.right)
+            Map(Node({ node with right = right, size = size(node.left) + size(node.right) + 1 }))
+        }
     }
 }
 

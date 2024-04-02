@@ -1,6 +1,7 @@
 options {
-    "--explicate-control" as explicateControlExamples: "Print examples for the explicate-control pass"
+    "--explicate-control"   as explicateControlExamples:   "Print examples for the explicate-control pass"
     "--select-instructions" as selectInstructionsExamples: "Print examples for the select-instructions pass"
+    "--assign-homes"        as assignHomesExamples:        "Print examples for the assign-homes pass"
 }
 
 module List = import("list.pls")
@@ -135,7 +136,7 @@ let prettyName(name) = name!.original ~ "." ~ toString(name!.unique)
 
 type Register = < RSP, RBP, RAX, RBX, RCX, RDX, RSI, RDI, R8, R9, R10, R11, R12, R13, R14, R15 >
 
-type Arg(arg) = < Immediate(Number), Register(Register), Deref(Register, Number) | arg >
+type Arg(arg) = < Immediate(Number), Register(Register), Deref(Register, Number), StackAddress(Number) | arg >
 
 type Label = String
 
@@ -177,6 +178,7 @@ let prettyArg(arg) = match arg {
         R14 -> "r14"
         R15 -> "r15"
     }
+    StackAddress(offset) -> "[rsp-${toString(offset*8)}]"
     Var(name) -> prettyName(name)
     Deref(_, _) -> fail("TODO")
 }
@@ -442,14 +444,37 @@ if selectInstructionsExamples then {
 
 data AssignHomesEnv = { variableOffsets : NameMap(Number) }
 
-let assignHomesInstructions : List(Instruction(< Var(Name) >)) -> List(Instruction(< >))
-let assignHomesInstructions(instructions) = match instructions {
-    [] -> []
-    _ -> fail("TODO")
+let assignArg : (Ref(AssignHomesEnv), Arg(< Var(Name) >)) -> Arg(< >)
+let assignArg(env, arg) = match arg {
+    Var(name) -> match Name.lookup(name, env!!.variableOffsets) {
+        Just(offset) -> StackAddress(offset)
+        Nothing -> {
+            let newOffset = Name.size(env!!.variableOffsets)
+            env := AssignHomesEnv({ variableOffsets = Name.insert(name, newOffset, env!!.variableOffsets) })
+            StackAddress(newOffset)
+        }
+    }
+    arg -> arg
 }
 
+let assignHomesInstruction : (Ref(AssignHomesEnv), Instruction(< Var(Name) >)) -> Instruction(< >)
+let assignHomesInstruction(env, instruction) = Instruction(match instruction! {
+    AddQ(arg1, arg2) -> AddQ(assignArg(env, arg1), assignArg(env, arg2))
+    SubQ(arg1, arg2) -> SubQ(assignArg(env, arg1), assignArg(env, arg2))
+    NegQ(arg) -> NegQ(assignArg(env, arg))
+    MovQ(arg1, arg2) -> MovQ(assignArg(env, arg1), assignArg(env, arg2))
+    PushQ(arg) -> PushQ(assignArg(env, arg))
+    PopQ(arg) -> PopQ(assignArg(env, arg))
+    CallQ(x, y) -> fail("a")
+    RetQ -> RetQ
+    Jmp(label) -> Jmp(label)
+})
+
 let assignHomesBlock : (Ref(AssignHomesEnv), Block(< Var(Name) >)) -> Block(< >)
-let assignHomesBlock(env, Block(block)) = Block({ instructions = assignHomesInstructions(block.instructions) })
+let assignHomesBlock(env, Block(block)) =
+    Block({
+            instructions = List.map(\instr -> assignHomesInstruction(env, instr), block.instructions)
+          })
 
 let assignHomes : X86Program(< Var(Name) >) -> X86Program(< >)
 let assignHomes(X86Program(program)) = {
